@@ -22,5 +22,29 @@
         <div class="content">
             {!! $article->body !!}
         </div>
+
+        <script>
+            document.querySelectorAll('.content img').forEach((img) => {
+                img.referrerPolicy = 'no-referrer';
+                img.onerror = () => {
+                    const tried = Number(img.dataset.fallbackTried ?? '0');
+                    const src = img.getAttribute('src') || '';
+
+                    if (src.includes('soluk.com.sa') && tried === 0) {
+                        img.dataset.fallbackTried = '1';
+                        img.src = src.replace('soluk.com.sa', 'soluk.sa');
+                        return;
+                    }
+
+                    if (src.includes('soluk.sa') && !src.includes('www.soluk.sa') && tried === 1) {
+                        img.dataset.fallbackTried = '2';
+                        img.src = src.replace('soluk.sa', 'www.soluk.sa');
+                        return;
+                    }
+
+                    img.style.display = 'none';
+                };
+            });
+        </script>
     </article>
 @endsection

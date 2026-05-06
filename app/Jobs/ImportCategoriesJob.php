@@ -21,8 +21,9 @@ class ImportCategoriesJob implements ShouldQueue
         $imported = 0;
         $failed = [];
         $seen = [];
+        $rows = $this->categoryRows($reader);
 
-        foreach ($reader->rows($this->sourcePath ?? config('legacy_import.categories'), config('legacy_import.category_tables', [])) as $row) {
+        foreach ($rows as $row) {
             $legacyId = $this->legacyId($row);
             $slug = (string) ($row['slug'] ?? '');
 
@@ -47,8 +48,11 @@ class ImportCategoriesJob implements ShouldQueue
             }
 
             Category::query()->updateOrCreate(
-                ['slug' => $slug],
+                filled($legacyId)
+                    ? ['legacy_source_id' => (string) $legacyId]
+                    : ['slug' => $slug],
                 [
+                    'slug' => $slug,
                     'name' => (string) ($row['name'] ?? $row['title'] ?? $slug),
                     'legacy_source_id' => filled($legacyId) ? (string) $legacyId : null,
                 ],
@@ -76,6 +80,52 @@ class ImportCategoriesJob implements ShouldQueue
     /** @param array<string, mixed> $row */
     private function legacyId(array $row): mixed
     {
-        return $row['legacy_id'] ?? $row['old_source_id'] ?? $row['old_id'] ?? $row['id'] ?? null;
+        return $row['legacy_id'] ?? $row['old_source_id'] ?? $row['old_id'] ?? $row['term_id'] ?? $row['id'] ?? null;
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function categoryRows(LegacySourceReader $reader): array
+    {
+        $path = $this->sourcePath ?? config('legacy_import.categories');
+        $rows = $reader->rows($path, config('legacy_import.category_tables', []));
+
+        if ($rows !== [] && isset($rows[0]['slug'])) {
+            return $rows;
+        }
+
+        $terms = $reader->rows($path, ['wp_terms', 'terms']);
+        $taxonomies = $reader->rows($path, ['wp_term_taxonomy', 'term_taxonomy']);
+
+        if ($terms === [] || $taxonomies === []) {
+            return $rows;
+        }
+
+        $categoryTermIds = [];
+        foreach ($taxonomies as $taxonomyRow) {
+            if (($taxonomyRow['taxonomy'] ?? null) !== 'category') {
+                continue;
+            }
+
+            $termId = $taxonomyRow['term_id'] ?? null;
+            if ($termId !== null) {
+                $categoryTermIds[(string) $termId] = true;
+            }
+        }
+
+        $normalized = [];
+        foreach ($terms as $term) {
+            $termId = $term['term_id'] ?? $term['id'] ?? null;
+            if ($termId === null || ! isset($categoryTermIds[(string) $termId])) {
+                continue;
+            }
+
+            $normalized[] = [
+                'legacy_id' => $termId,
+                'name' => $term['name'] ?? $term['slug'] ?? $termId,
+                'slug' => $term['slug'] ?? $term['name'] ?? $termId,
+            ];
+        }
+
+        return $normalized;
     }
 }

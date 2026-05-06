@@ -5,13 +5,29 @@ namespace App\Filament\Pages;
 use App\Jobs\ImportArticlesJob;
 use App\Jobs\ImportCategoriesJob;
 use Filament\Actions\Action;
-use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ViewField;
 use Filament\Notifications\Notification;
 use Filament\Pages\Dashboard as BaseDashboard;
 
 class Dashboard extends BaseDashboard
 {
+    /** @return array<int, string> */
+    private static function importAcceptedFileTypes(): array
+    {
+        return [
+            'application/json',
+            'text/json',
+            'application/sql',
+            'application/x-sql',
+            'text/sql',
+            'text/x-sql',
+            'text/plain',
+            'application/octet-stream',
+        ];
+    }
+
     protected static ?string $title = 'لوحة التحكم';
 
     protected static ?string $navigationLabel = 'لوحة التحكم';
@@ -34,28 +50,29 @@ class Dashboard extends BaseDashboard
                 ->icon('heroicon-o-folder-arrow-down')
                 ->color('info')
                 ->schema([
-                    TextInput::make('path')
-                        ->label('ملف التصنيفات')
-                        ->placeholder('مثال: imports/categories.json')
-                        ->helperText('يمكنك إدخال مسار كامل، أو مسار داخل storage/app/private')
+                    FileUpload::make('uploaded_file')
+                        ->label('رفع ملف التصنيفات')
+                        ->disk('local')
+                        ->directory('imports')
+                        ->acceptedFileTypes(self::importAcceptedFileTypes())
+                        ->helperText('JSON أو SQL')
                         ->required(),
+                    ViewField::make('upload_progress_categories')
+                        ->view('filament.components.upload-progress'),
                     Toggle::make('run_now')
                         ->label('تنفيذ فوري')
-                        ->default(true)
-                        ->helperText('أوقفه إذا كنت تريد إرسال المهمة إلى queue'),
+                        ->default(true),
                 ])
                 ->modalHeading('استيراد التصنيفات')
-                ->modalDescription('سيتم الحفاظ على الـ slug القديم كما هو، وأي تعارض سيتم تسجيله في سجل الاستيراد.')
                 ->modalSubmitActionLabel('ابدأ الاستيراد')
                 ->action(function (array $data): void {
-                    $job = new ImportCategoriesJob($data['path']);
+                    $job = new ImportCategoriesJob($this->resolveUploadedFilePath($data, 'uploaded_file'));
 
                     if ($data['run_now'] ?? false) {
                         app()->call([$job, 'handle']);
 
                         Notification::make()
                             ->title('تم استيراد التصنيفات')
-                            ->body('اكتمل التنفيذ الفوري، ويمكنك مراجعة النتائج الآن.')
                             ->success()
                             ->send();
 
@@ -65,8 +82,7 @@ class Dashboard extends BaseDashboard
                     dispatch($job);
 
                     Notification::make()
-                        ->title('تم إرسال استيراد التصنيفات')
-                        ->body('المهمة أُرسلت إلى الطابور. شغّل queue:work إذا لم يكن يعمل بالفعل.')
+                        ->title('تم إرسال استيراد التصنيفات للطابور')
                         ->success()
                         ->send();
                 }),
@@ -75,28 +91,29 @@ class Dashboard extends BaseDashboard
                 ->icon('heroicon-o-document-arrow-down')
                 ->color('primary')
                 ->schema([
-                    TextInput::make('path')
-                        ->label('ملف المقالات')
-                        ->placeholder('مثال: imports/articles.json')
-                        ->helperText('الصور تُقرأ من images أو image_urls أو image_paths')
+                    FileUpload::make('uploaded_file')
+                        ->label('رفع ملف المقالات')
+                        ->disk('local')
+                        ->directory('imports')
+                        ->acceptedFileTypes(self::importAcceptedFileTypes())
+                        ->helperText('JSON أو SQL')
                         ->required(),
+                    ViewField::make('upload_progress_articles')
+                        ->view('filament.components.upload-progress'),
                     Toggle::make('run_now')
                         ->label('تنفيذ فوري')
-                        ->default(true)
-                        ->helperText('أوقفه إذا كنت تريد إرسال المهمة إلى queue'),
+                        ->default(true),
                 ])
                 ->modalHeading('استيراد المقالات')
-                ->modalDescription('تأكد من استيراد التصنيفات أولًا حتى ينجح الربط بين المقالات والتصنيفات.')
                 ->modalSubmitActionLabel('ابدأ الاستيراد')
                 ->action(function (array $data): void {
-                    $job = new ImportArticlesJob($data['path']);
+                    $job = new ImportArticlesJob($this->resolveUploadedFilePath($data, 'uploaded_file'));
 
                     if ($data['run_now'] ?? false) {
                         app()->call([$job, 'handle']);
 
                         Notification::make()
                             ->title('تم استيراد المقالات')
-                            ->body('اكتمل التنفيذ الفوري، ويمكنك مراجعة النتائج الآن.')
                             ->success()
                             ->send();
 
@@ -106,8 +123,7 @@ class Dashboard extends BaseDashboard
                     dispatch($job);
 
                     Notification::make()
-                        ->title('تم إرسال استيراد المقالات')
-                        ->body('المهمة أُرسلت إلى الطابور. شغّل queue:work إذا لم يكن يعمل بالفعل.')
+                        ->title('تم إرسال استيراد المقالات للطابور')
                         ->success()
                         ->send();
                 }),
@@ -116,47 +132,66 @@ class Dashboard extends BaseDashboard
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('success')
                 ->schema([
-                    TextInput::make('categories_path')
-                        ->label('ملف التصنيفات')
-                        ->placeholder('مثال: imports/categories.json')
-                        ->helperText('يمكنك إدخال مسار JSON أو SQL')
+                    FileUpload::make('categories_uploaded_file')
+                        ->label('رفع ملف التصنيفات')
+                        ->disk('local')
+                        ->directory('imports')
+                        ->acceptedFileTypes(self::importAcceptedFileTypes())
+                        ->helperText('JSON أو SQL')
                         ->required(),
-                    TextInput::make('articles_path')
-                        ->label('ملف المقالات')
-                        ->placeholder('مثال: imports/articles.json')
-                        ->helperText('يمكنك إدخال مسار JSON أو SQL')
+                    ViewField::make('upload_progress_all_categories')
+                        ->view('filament.components.upload-progress'),
+                    FileUpload::make('articles_uploaded_file')
+                        ->label('رفع ملف المقالات')
+                        ->disk('local')
+                        ->directory('imports')
+                        ->acceptedFileTypes(self::importAcceptedFileTypes())
+                        ->helperText('JSON أو SQL')
                         ->required(),
+                    ViewField::make('upload_progress_all_articles')
+                        ->view('filament.components.upload-progress'),
                     Toggle::make('run_now')
                         ->label('تنفيذ فوري')
-                        ->default(true)
-                        ->helperText('أوقفه إذا كنت تريد إرسال المهمتين إلى queue'),
+                        ->default(true),
                 ])
                 ->modalHeading('استيراد التصنيفات والمقالات')
-                ->modalDescription('سيتم تشغيل استيراد التصنيفات أولًا ثم المقالات باستخدام نفس قواعد الحفاظ على الـ slug القديم.')
                 ->modalSubmitActionLabel('ابدأ الاستيراد')
                 ->action(function (array $data): void {
+                    $categoriesPath = $this->resolveUploadedFilePath($data, 'categories_uploaded_file');
+                    $articlesPath = $this->resolveUploadedFilePath($data, 'articles_uploaded_file');
+
                     if ($data['run_now'] ?? false) {
-                        app()->call([new ImportCategoriesJob($data['categories_path']), 'handle']);
-                        app()->call([new ImportArticlesJob($data['articles_path']), 'handle']);
+                        app()->call([new ImportCategoriesJob($categoriesPath), 'handle']);
+                        app()->call([new ImportArticlesJob($articlesPath), 'handle']);
 
                         Notification::make()
-                            ->title('تم استيراد التصنيفات والمقالات')
-                            ->body('اكتمل التنفيذ الفوري للملفين.')
+                            ->title('تم اكتمال الاستيراد')
                             ->success()
                             ->send();
 
                         return;
                     }
 
-                    dispatch(new ImportCategoriesJob($data['categories_path']));
-                    dispatch(new ImportArticlesJob($data['articles_path']));
+                    dispatch(new ImportCategoriesJob($categoriesPath));
+                    dispatch(new ImportArticlesJob($articlesPath));
 
                     Notification::make()
-                        ->title('تم إرسال مهمات الاستيراد')
-                        ->body('تم إرسال التصنيفات والمقالات إلى الطابور.')
+                        ->title('تم إرسال مهام الاستيراد للطابور')
                         ->success()
                         ->send();
                 }),
         ];
+    }
+
+    /** @param array<string, mixed> $data */
+    private function resolveUploadedFilePath(array $data, string $uploadField): ?string
+    {
+        $uploadedPath = $data[$uploadField] ?? null;
+
+        if (is_string($uploadedPath) && filled($uploadedPath)) {
+            return $uploadedPath;
+        }
+
+        return null;
     }
 }
