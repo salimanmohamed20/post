@@ -12,7 +12,7 @@ use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-#[Fillable(['title', 'slug', 'body', 'excerpt', 'category_id', 'published_at', 'is_published'])]
+#[Fillable(['title', 'slug', 'legacy_source_id', 'body', 'excerpt', 'category_id', 'published_at', 'is_published'])]
 class Article extends Model implements HasMedia
 {
     use HasFactory;

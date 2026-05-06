@@ -22,8 +22,8 @@ class ImportCategoriesJob implements ShouldQueue
         $failed = [];
         $seen = [];
 
-        foreach ($reader->rows($this->sourcePath ?? config('legacy_import.categories')) as $row) {
-            $legacyId = $row['id'] ?? $row['old_id'] ?? null;
+        foreach ($reader->rows($this->sourcePath ?? config('legacy_import.categories'), config('legacy_import.category_tables', [])) as $row) {
+            $legacyId = $this->legacyId($row);
             $slug = (string) ($row['slug'] ?? '');
 
             if (isset($seen[$slug])) {
@@ -32,7 +32,13 @@ class ImportCategoriesJob implements ShouldQueue
             }
 
             $seen[$slug] = true;
-            $existing = Category::query()->where('slug', $slug)->first();
+            $existing = Category::query()
+                ->when(
+                    filled($legacyId),
+                    fn ($query) => $query->where('legacy_source_id', (string) $legacyId)->orWhere('slug', $slug),
+                    fn ($query) => $query->where('slug', $slug),
+                )
+                ->first();
             $reason = $slugs->validateImportedSlug($slug, Category::class, $existing?->id);
 
             if ($reason !== null) {
@@ -42,7 +48,10 @@ class ImportCategoriesJob implements ShouldQueue
 
             Category::query()->updateOrCreate(
                 ['slug' => $slug],
-                ['name' => (string) ($row['name'] ?? $row['title'] ?? $slug)],
+                [
+                    'name' => (string) ($row['name'] ?? $row['title'] ?? $slug),
+                    'legacy_source_id' => filled($legacyId) ? (string) $legacyId : null,
+                ],
             );
 
             $imported++;
@@ -62,5 +71,11 @@ class ImportCategoriesJob implements ShouldQueue
     private function failure(mixed $legacyId, string $slug, string $reason): array
     {
         return ['old_source_id' => $legacyId, 'old_slug' => $slug, 'reason' => $reason];
+    }
+
+    /** @param array<string, mixed> $row */
+    private function legacyId(array $row): mixed
+    {
+        return $row['legacy_id'] ?? $row['old_source_id'] ?? $row['old_id'] ?? $row['id'] ?? null;
     }
 }

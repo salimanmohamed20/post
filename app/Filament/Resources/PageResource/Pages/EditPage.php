@@ -11,6 +11,11 @@ class EditPage extends EditRecord
 {
     protected static string $resource = PageResource::class;
 
+    public function getTitle(): string
+    {
+        return 'تعديل الصفحة';
+    }
+
     protected function mutateFormDataBeforeSave(array $data): array
     {
         $data['slug'] = $data['slug'] ?: app(SlugService::class)->generateUnique($data['title'], Page::class, $this->record->id);

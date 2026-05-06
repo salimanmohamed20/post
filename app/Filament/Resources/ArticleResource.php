@@ -44,54 +44,77 @@ class ArticleResource extends Resource
 
     public static function form(Schema $schema): Schema
     {
-        return $schema->components([
-            Section::make('المحتوى')->schema([
-                TextInput::make('title')
-                    ->label('العنوان')
-                    ->required()
-                    ->maxLength(255)
-                    ->live(onBlur: true)
-                    ->afterStateUpdated(function (Set $set, Get $get, ?string $state): void {
-                        if (blank($get('slug')) && filled($state)) {
-                            $set('slug', app(SlugService::class)->generateUnique($state, Article::class));
-                        }
-                    }),
-                TextInput::make('slug')
-                    ->label('الرابط')
-                    ->required()
-                    ->maxLength(255)
-                    ->unique(ignoreRecord: true),
-                RichEditor::make('body')
-                    ->label('المحتوى')
-                    ->required()
-                    ->columnSpanFull(),
-                Textarea::make('excerpt')
-                    ->label('المقتطف')
-                    ->rows(3)
-                    ->columnSpanFull(),
-            ])->columns(2),
-            Section::make('النشر والصور')->schema([
-                Select::make('category_id')
-                    ->label('التصنيف')
-                    ->relationship('category', 'name')
-                    ->searchable()
-                    ->preload()
-                    ->required(),
-                Toggle::make('is_published')
-                    ->label('منشور')
-                    ->default(false),
-                DateTimePicker::make('published_at')
-                    ->label('تاريخ النشر')
-                    ->seconds(false),
-                SpatieMediaLibraryFileUpload::make('images')
-                    ->label('صور المقال')
-                    ->collection('images')
-                    ->multiple()
-                    ->reorderable()
-                    ->image()
-                    ->columnSpanFull(),
-            ])->columns(2),
-        ]);
+        return $schema
+            ->columns(3)
+            ->components([
+                Section::make('محتوى المقال')
+                    ->description('ابدأ بالعنوان والمقتطف ثم حرر النص الكامل للمقال.')
+                    ->columnSpan(2)
+                    ->schema([
+                        TextInput::make('title')
+                            ->label('العنوان')
+                            ->required()
+                            ->maxLength(255)
+                            ->live(onBlur: true)
+                            ->afterStateUpdated(function (Set $set, Get $get, ?string $state): void {
+                                if (blank($get('slug')) && filled($state)) {
+                                    $set('slug', app(SlugService::class)->generateUnique($state, Article::class));
+                                }
+                            }),
+                        TextInput::make('slug')
+                            ->label('الرابط المختصر')
+                            ->helperText('هذا هو الجزء الذي يظهر داخل رابط المقال.')
+                            ->required()
+                            ->maxLength(255)
+                            ->unique(ignoreRecord: true),
+                        Textarea::make('excerpt')
+                            ->label('المقتطف')
+                            ->rows(4)
+                            ->helperText('ملخص قصير يظهر في البطاقات وصفحات القوائم.')
+                            ->columnSpanFull(),
+                        RichEditor::make('body')
+                            ->label('نص المقال')
+                            ->required()
+                            ->columnSpanFull(),
+                    ])
+                    ->columns(2),
+                Section::make('إعدادات النشر')
+                    ->description('حدد أين ومتى يظهر المقال.')
+                    ->columnSpan(1)
+                    ->schema([
+                        Select::make('category_id')
+                            ->label('التصنيف')
+                            ->relationship('category', 'name')
+                            ->searchable()
+                            ->preload()
+                            ->required(),
+                        Toggle::make('is_published')
+                            ->label('منشور')
+                            ->default(false)
+                            ->inline(false),
+                        DateTimePicker::make('published_at')
+                            ->label('تاريخ النشر')
+                            ->seconds(false)
+                            ->native(false)
+                            ->helperText('اتركه فارغًا إذا كان المقال مسودة.'),
+                    ])
+                    ->compact(),
+                Section::make('صور المقال')
+                    ->description('رتب الصور بحيث تكون الصورة الأولى هي صورة الغلاف.')
+                    ->columnSpanFull()
+                    ->schema([
+                        SpatieMediaLibraryFileUpload::make('images')
+                            ->label('معرض الصور')
+                            ->collection('images')
+                            ->multiple()
+                            ->reorderable()
+                            ->image()
+                            ->panelLayout('grid')
+                            ->imageEditor()
+                            ->helperText('يمكنك السحب والإفلات، وإعادة الترتيب، وحذف أي صورة قبل الحفظ.')
+                            ->columnSpanFull(),
+                    ]),
+            ]);
     }
 
     public static function table(Table $table): Table

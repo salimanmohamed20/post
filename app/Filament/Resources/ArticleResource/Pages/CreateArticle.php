@@ -11,6 +11,11 @@ class CreateArticle extends CreateRecord
 {
     protected static string $resource = ArticleResource::class;
 
+    public function getTitle(): string
+    {
+        return 'مقال جديد';
+    }
+
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $data['slug'] = $data['slug'] ?: app(SlugService::class)->generateUnique($data['title'], Article::class);

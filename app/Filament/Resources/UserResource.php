@@ -67,7 +67,15 @@ class UserResource extends Resource
             ->columns([
                 TextColumn::make('name')->label('الاسم')->searchable()->sortable(),
                 TextColumn::make('email')->label('البريد الإلكتروني')->searchable()->sortable(),
-                TextColumn::make('role')->label('الدور')->badge()->sortable(),
+                TextColumn::make('role')
+                    ->label('الدور')
+                    ->badge()
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'admin' => 'مدير',
+                        'editor' => 'محرر',
+                        default => $state,
+                    })
+                    ->sortable(),
                 TextColumn::make('created_at')->label('تاريخ الإنشاء')->dateTime()->sortable(),
             ])
             ->recordActions([

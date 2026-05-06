@@ -11,6 +11,11 @@ class EditArticle extends EditRecord
 {
     protected static string $resource = ArticleResource::class;
 
+    public function getTitle(): string
+    {
+        return 'تعديل المقال';
+    }
+
     protected function mutateFormDataBeforeSave(array $data): array
     {
         $data['slug'] = $data['slug'] ?: app(SlugService::class)->generateUnique($data['title'], Article::class, $this->record->id);

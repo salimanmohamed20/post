@@ -11,6 +11,11 @@ class CreateCategory extends CreateRecord
 {
     protected static string $resource = CategoryResource::class;
 
+    public function getTitle(): string
+    {
+        return 'تصنيف جديد';
+    }
+
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $data['slug'] = $data['slug'] ?: app(SlugService::class)->generateUnique($data['name'], Category::class);
