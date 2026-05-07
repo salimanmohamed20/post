@@ -5,6 +5,7 @@ namespace App\Providers\Filament;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Resources\ArticleResource;
 use App\Filament\Resources\CategoryResource;
+use App\Filament\Resources\ImportLogResource;
 use App\Filament\Resources\PageResource;
 use App\Filament\Resources\UserResource;
 use App\Filament\Widgets\ArticlesByMonthChart;
@@ -44,6 +45,7 @@ class AdminPanelProvider extends PanelProvider
             ->resources([
                 ArticleResource::class,
                 CategoryResource::class,
+                ImportLogResource::class,
                 PageResource::class,
                 UserResource::class,
             ])

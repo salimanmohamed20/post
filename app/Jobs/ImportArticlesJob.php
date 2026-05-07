@@ -23,7 +23,9 @@ class ImportArticlesJob implements ShouldQueue
     /** @var array<string, string> */
     private array $localizedImageCache = [];
 
-    public function __construct(private readonly ?string $sourcePath = null) {}
+    public function __construct(
+        private readonly ?string $sourcePath = null,
+    ) {}
 
     public function handle(
         LegacySourceReader $reader,
@@ -35,7 +37,10 @@ class ImportArticlesJob implements ShouldQueue
         $failed = [];
         $seen = [];
 
-        foreach ($this->articleRows($reader) as $row) {
+        $rows = $this->previewRows($reader);
+
+
+        foreach ($rows as $row) {
             $legacyId = $this->legacyId($row);
             $slug = (string) ($row['slug'] ?? '');
 
@@ -106,6 +111,7 @@ class ImportArticlesJob implements ShouldQueue
             }
 
             $imported++;
+
         }
 
         ImportLog::query()->create([
@@ -116,6 +122,13 @@ class ImportArticlesJob implements ShouldQueue
         ]);
 
         $cache->flushPublicContent();
+
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function previewRows(LegacySourceReader $reader): array
+    {
+        return $this->articleRows($reader);
     }
 
     /** @return array{old_source_id:mixed,old_slug:string,reason:string} */
@@ -408,13 +421,20 @@ class ImportArticlesJob implements ShouldQueue
             return null;
         }
 
-        $response = Http::timeout(20)
-            ->withHeaders([
-                'User-Agent' => 'Mozilla/5.0',
-                'Accept' => 'image/*,*/*;q=0.8',
-                'Referer' => $this->refererFromUrl($url),
-            ])
-            ->get($url);
+        try {
+            $response = Http::connectTimeout(5)
+                ->timeout(20)
+                ->retry(2, 250)
+                ->withHeaders([
+                    'User-Agent' => 'Mozilla/5.0',
+                    'Accept' => 'image/*,*/*;q=0.8',
+                    'Referer' => $this->refererFromUrl($url),
+                ])
+                ->get($url);
+        } catch (\Throwable) {
+            $this->localizedImageCache[$url] = '';
+            return null;
+        }
 
         if (! $response->successful()) {
             $this->localizedImageCache[$url] = '';
@@ -510,6 +530,22 @@ class ImportArticlesJob implements ShouldQueue
     {
         if (! str_contains($value, 'http://') && ! str_contains($value, 'https://')) {
             return $value;
+        }
+
+        // Handles malformed links like:
+        // https://domain-a.com/https://domain-b.com/path.jpg
+        $pos = stripos($value, '://');
+        if ($pos !== false) {
+            $secondHttp = stripos($value, 'http://', $pos + 3);
+            $secondHttps = stripos($value, 'https://', $pos + 3);
+
+            $candidates = array_filter([$secondHttp, $secondHttps], fn ($v) => $v !== false);
+            if ($candidates !== []) {
+                $start = min($candidates);
+                if (is_int($start) && $start > 0) {
+                    return substr($value, $start);
+                }
+            }
         }
 
         if (preg_match('/https?:\/\/.+?(https?:\/\/.+)$/i', $value, $matches) === 1) {

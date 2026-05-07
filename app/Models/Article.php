@@ -88,4 +88,55 @@ class Article extends Model implements HasMedia
             ->fit(Fit::Crop, 720, 420)
             ->nonQueued();
     }
+
+    protected function setBodyAttribute(string $value): void
+    {
+        $this->attributes['body'] = $this->normalizeBrokenImageUrls($value);
+    }
+
+    private function normalizeBrokenImageUrls(string $html): string
+    {
+        if ($html === '' || ! str_contains($html, '<img')) {
+            return $html;
+        }
+
+        return (string) preg_replace_callback(
+            '/(<img\b[^>]*\bsrc=["\'])([^"\']+)(["\'][^>]*>)/i',
+            function (array $matches): string {
+                $prefix = $matches[1] ?? '';
+                $src = trim((string) ($matches[2] ?? ''));
+                $suffix = $matches[3] ?? '';
+
+                return $prefix . $this->fixDuplicatedAbsoluteUrl($src) . $suffix;
+            },
+            $html,
+        );
+    }
+
+    private function fixDuplicatedAbsoluteUrl(string $value): string
+    {
+        if (! str_contains($value, 'http://') && ! str_contains($value, 'https://')) {
+            return $value;
+        }
+
+        $firstSchemePos = stripos($value, '://');
+        if ($firstSchemePos !== false) {
+            $secondHttp = stripos($value, 'http://', $firstSchemePos + 3);
+            $secondHttps = stripos($value, 'https://', $firstSchemePos + 3);
+            $candidates = array_filter([$secondHttp, $secondHttps], fn ($v) => $v !== false);
+
+            if ($candidates !== []) {
+                $start = min($candidates);
+                if (is_int($start) && $start > 0) {
+                    return substr($value, $start);
+                }
+            }
+        }
+
+        if (preg_match('/https?:\/\/.+?(https?:\/\/.+)$/i', $value, $matches) === 1) {
+            return $matches[1];
+        }
+
+        return $value;
+    }
 }

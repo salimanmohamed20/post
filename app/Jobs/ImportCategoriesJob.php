@@ -14,14 +14,21 @@ class ImportCategoriesJob implements ShouldQueue
 {
     use Queueable;
 
-    public function __construct(private readonly ?string $sourcePath = null) {}
+    public function __construct(
+        private readonly ?string $sourcePath = null,
+    ) {}
 
-    public function handle(LegacySourceReader $reader, SlugService $slugs, CacheInvalidationService $cache): void
+    public function handle(
+        LegacySourceReader $reader,
+        SlugService $slugs,
+        CacheInvalidationService $cache,
+    ): void
     {
         $imported = 0;
         $failed = [];
         $seen = [];
-        $rows = $this->categoryRows($reader);
+        $rows = $this->previewRows($reader);
+
 
         foreach ($rows as $row) {
             $legacyId = $this->legacyId($row);
@@ -59,6 +66,7 @@ class ImportCategoriesJob implements ShouldQueue
             );
 
             $imported++;
+
         }
 
         ImportLog::query()->create([
@@ -69,6 +77,12 @@ class ImportCategoriesJob implements ShouldQueue
         ]);
 
         $cache->flushPublicContent();
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    public function previewRows(LegacySourceReader $reader): array
+    {
+        return $this->categoryRows($reader);
     }
 
     /** @return array{old_source_id:mixed,old_slug:string,reason:string} */
