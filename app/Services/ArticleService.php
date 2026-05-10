@@ -4,13 +4,17 @@ namespace App\Services;
 
 use App\Models\Article;
 use App\Models\Category;
+use App\Services\InlineArticleImageService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
 
 class ArticleService
 {
-    public function __construct(private readonly CacheInvalidationService $cache) {}
+    public function __construct(
+        private readonly CacheInvalidationService $cache,
+        private readonly InlineArticleImageService $inlineImages,
+    ) {}
 
     public function latest(int $limit = 6): Collection
     {
@@ -71,9 +75,13 @@ class ArticleService
             ->firstOrFail();
 
         $normalizedBody = $this->normalizeBrokenImageUrls((string) $article->body);
-        if ($normalizedBody !== (string) $article->body) {
-            $article->body = $normalizedBody;
+        $localizedBody = $this->inlineImages->replaceWithStoredMediaUrls($article, $normalizedBody);
+
+        if ($localizedBody !== (string) $article->body) {
+            $article->body = $localizedBody;
             $article->saveQuietly();
+        } else {
+            $article->body = $localizedBody;
         }
 
         return $article;

@@ -37,6 +37,47 @@ class InlineArticleImageService
         );
     }
 
+    public function replaceWithStoredMediaUrls(Article $article, string $html): string
+    {
+        if ($html === '' || ! str_contains($html, '<img')) {
+            return $html;
+        }
+
+        $map = [];
+        foreach ($article->getMedia('content-images') as $media) {
+            $sourceUrl = (string) ($media->getCustomProperty('source_url') ?? '');
+            if ($sourceUrl === '') {
+                continue;
+            }
+
+            $normalized = $this->normalizeUrl($sourceUrl);
+            $map[$normalized] = $media->getUrl();
+        }
+
+        if ($map === []) {
+            return $html;
+        }
+
+        return (string) preg_replace_callback(
+            '/(<img\b[^>]*\bsrc=["\'])([^"\']+)(["\'][^>]*>)/i',
+            function (array $matches) use ($map): string {
+                $prefix = $matches[1] ?? '';
+                $src = trim((string) ($matches[2] ?? ''));
+                $suffix = $matches[3] ?? '';
+
+                if ($src === '') {
+                    return $prefix . $src . $suffix;
+                }
+
+                $normalized = $this->normalizeUrl($src);
+                $local = $map[$normalized] ?? null;
+
+                return $prefix . ($local ?: $src) . $suffix;
+            },
+            $html,
+        );
+    }
+
     private function normalizeUrl(string $url): string
     {
         $url = $this->unwrapProxyUrl($url);
