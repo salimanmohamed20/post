@@ -81,7 +81,7 @@ class ImportArticlesJob implements ShouldQueue
                     'slug' => $slug,
                     'title' => (string) ($row['title'] ?? $slug),
                     'legacy_source_id' => filled($legacyId) ? (string) $legacyId : null,
-                    'body' => $this->normalizeBodyImages((string) ($row['body'] ?? '')),
+                    'body' => $this->localizeBodyImages($this->normalizeBodyImages((string) ($row['body'] ?? ''))),
                     'excerpt' => $row['excerpt'] ?? null,
                     'category_id' => $category->id,
                     'published_at' => isset($row['published_at']) ? Carbon::parse($row['published_at']) : null,
@@ -432,6 +432,7 @@ class ImportArticlesJob implements ShouldQueue
             $response = Http::connectTimeout(5)
                 ->timeout(20)
                 ->retry(2, 250)
+                ->withOptions(['verify' => false])
                 ->withHeaders([
                     'User-Agent' => 'Mozilla/5.0',
                     'Accept' => 'image/*,*/*;q=0.8',
