@@ -460,7 +460,7 @@ class ImportArticlesJob implements ShouldQueue
 
         Storage::disk('public')->put($relativePath, $response->body());
 
-        $localUrl = Storage::disk('public')->url($relativePath);
+        $localUrl = '/storage/' . $relativePath;
         $this->localizedImageCache[$url] = $localUrl;
 
         return $localUrl;

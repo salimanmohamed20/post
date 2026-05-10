@@ -157,6 +157,13 @@ class LocalizeArticleImagesCommand extends Command
                     return $prefix . $src . $suffix;
                 }
 
+                // Fix broken localhost URLs from previous runs
+                $fixed = $this->fixLocalhostUrl($src);
+                if ($fixed !== null) {
+                    $this->skipped++;
+                    return $prefix . $fixed . $suffix;
+                }
+
                 if ($this->isLocalUrl($src)) {
                     $this->skipped++;
                     return $prefix . $src . $suffix;
@@ -178,6 +185,18 @@ class LocalizeArticleImagesCommand extends Command
             },
             $html,
         );
+    }
+
+    /**
+     * Fix URLs like http://localhost/storage/... from previous broken runs.
+     */
+    private function fixLocalhostUrl(string $url): ?string
+    {
+        if (preg_match('#^https?://[^/]*/storage/(imports/inline-images/.+)$#', $url, $m)) {
+            return '/storage/' . $m[1];
+        }
+
+        return null;
     }
 
     private function isLocalUrl(string $url): bool
@@ -293,9 +312,8 @@ class LocalizeArticleImagesCommand extends Command
         $relativePath = 'imports/inline-images/' . date('Y/m') . '/' . sha1($cacheKey) . '.' . $extension;
 
         if (Storage::disk('public')->exists($relativePath)) {
-            $localUrl = Storage::disk('public')->url($relativePath);
             $this->skipped++;
-            return $localUrl;
+            return '/storage/' . $relativePath;
         }
 
         try {
@@ -327,13 +345,12 @@ class LocalizeArticleImagesCommand extends Command
 
         Storage::disk('public')->put($relativePath, $response->body());
 
-        $localUrl = Storage::disk('public')->url($relativePath);
         $this->downloaded++;
 
         $this->newLine();
         $this->info("  ↓ Downloaded: {$url}");
 
-        return $localUrl;
+        return '/storage/' . $relativePath;
     }
 
     private function refererFromUrl(string $url): string
