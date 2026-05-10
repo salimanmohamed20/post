@@ -76,6 +76,9 @@ class Article extends Model implements HasMedia
     {
         $this->addMediaCollection('images')
             ->useDisk(config('filesystems.default', 'public'));
+
+        $this->addMediaCollection('content-images')
+            ->useDisk(config('filesystems.default', 'public'));
     }
 
     public function registerMediaConversions(?Media $media = null): void

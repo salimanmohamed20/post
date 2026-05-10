@@ -8,6 +8,7 @@ use App\Models\Category;
 use App\Models\ImportLog;
 use App\Services\CacheInvalidationService;
 use App\Services\ImageService;
+use App\Services\InlineArticleImageService;
 use App\Services\SlugService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -31,6 +32,7 @@ class ImportArticlesJob implements ShouldQueue
         LegacySourceReader $reader,
         SlugService $slugs,
         ImageService $images,
+        InlineArticleImageService $inlineImages,
         CacheInvalidationService $cache,
     ): void {
         $imported = 0;
@@ -79,7 +81,7 @@ class ImportArticlesJob implements ShouldQueue
                     'slug' => $slug,
                     'title' => (string) ($row['title'] ?? $slug),
                     'legacy_source_id' => filled($legacyId) ? (string) $legacyId : null,
-                    'body' => $this->localizeBodyImages($this->normalizeBodyImages((string) ($row['body'] ?? ''))),
+                    'body' => $this->normalizeBodyImages((string) ($row['body'] ?? '')),
                     'excerpt' => $row['excerpt'] ?? null,
                     'category_id' => $category->id,
                     'published_at' => isset($row['published_at']) ? Carbon::parse($row['published_at']) : null,
@@ -108,6 +110,11 @@ class ImportArticlesJob implements ShouldQueue
                 $images->attachArticleImages($article, $this->imagePaths($row), true);
             } catch (\Throwable $exception) {
                 $failed[] = $this->failure($legacyId, $slug, 'failed_image_import: ' . $exception->getMessage());
+            }
+
+            $localizedBody = $inlineImages->localizeForArticle($article, (string) $article->body);
+            if ($localizedBody !== (string) $article->body) {
+                $article->forceFill(['body' => $localizedBody])->saveQuietly();
             }
 
             $imported++;
