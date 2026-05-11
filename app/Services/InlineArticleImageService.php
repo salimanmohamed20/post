@@ -11,7 +11,7 @@ class InlineArticleImageService
     /** @var array<string, string> */
     private array $resolvedUrlCache = [];
 
-    public function localizeForArticle(Article $article, string $html): string
+    public function localizeForArticle(Article $article, string $html, bool $downloadMissing = true): string
     {
         if ($html === '' || ! str_contains($html, '<img')) {
             return $html;
@@ -19,7 +19,7 @@ class InlineArticleImageService
 
         return (string) preg_replace_callback(
             '/(<img\b[^>]*\bsrc=["\'])([^"\']+)(["\'][^>]*>)/i',
-            function (array $matches) use ($article): string {
+            function (array $matches) use ($article, $downloadMissing): string {
                 $prefix = $matches[1] ?? '';
                 $src = trim((string) ($matches[2] ?? ''));
                 $suffix = $matches[3] ?? '';
@@ -29,7 +29,11 @@ class InlineArticleImageService
                 }
 
                 $normalized = $this->normalizeUrl($src);
-                $localUrl = $this->downloadToMedia($article, $normalized);
+                $localUrl = $this->storedMediaUrl($article, $normalized);
+
+                if ($localUrl === null && $downloadMissing) {
+                    $localUrl = $this->downloadToMedia($article, $normalized);
+                }
 
                 return $prefix . ($localUrl ?? $normalized) . $suffix;
             },
@@ -115,33 +119,6 @@ class InlineArticleImageService
             return $this->resolvedUrlCache[$url];
         }
 
-        try {
-            $response = Http::connectTimeout(5)
-                ->timeout(20)
-                ->retry(2, 250)
-                ->withOptions(['verify' => false])
-                ->withHeaders([
-                    'User-Agent' => 'Mozilla/5.0',
-                    'Accept' => 'image/*,*/*;q=0.8',
-                    'Referer' => $this->refererFromUrl($url),
-                ])
-                ->get($url);
-        } catch (\Throwable) {
-            $this->resolvedUrlCache[$url] = '';
-            return null;
-        }
-
-        if (! $response->successful()) {
-            $this->resolvedUrlCache[$url] = '';
-            return null;
-        }
-
-        $contentType = strtolower((string) $response->header('Content-Type', ''));
-        if (! str_starts_with($contentType, 'image/')) {
-            $this->resolvedUrlCache[$url] = '';
-            return null;
-        }
-
         $existing = $article->media()
             ->where('collection_name', 'content-images')
             ->where('custom_properties->source_url', $url)
@@ -152,18 +129,119 @@ class InlineArticleImageService
             return $this->resolvedUrlCache[$url];
         }
 
-        $extension = $this->extensionFromUrlOrType($url, $contentType);
+        $download = $this->downloadWithFallbacks($url);
+        if ($download === null) {
+            $this->resolvedUrlCache[$url] = '';
+            return null;
+        }
+
+        [$body, $contentType, $downloadedUrl] = $download;
+        $extension = $this->extensionFromUrlOrType($downloadedUrl, $contentType);
         $fileName = 'inline-' . sha1($url) . '.' . $extension;
 
         $media = $article
-            ->addMediaFromString($response->body())
+            ->addMediaFromString($body)
             ->usingFileName($fileName)
-            ->withCustomProperties(['source_url' => $url])
+            ->withCustomProperties([
+                'source_url' => $url,
+                'downloaded_from' => $downloadedUrl,
+            ])
             ->toMediaCollection('content-images');
 
         $this->resolvedUrlCache[$url] = $media->getUrl();
 
         return $this->resolvedUrlCache[$url];
+    }
+
+    private function storedMediaUrl(Article $article, string $url): ?string
+    {
+        $media = $article->media()
+            ->where('collection_name', 'content-images')
+            ->where('custom_properties->source_url', $url)
+            ->first();
+
+        return $media?->getUrl();
+    }
+
+    /** @return array{0: string, 1: string, 2: string}|null */
+    private function downloadWithFallbacks(string $url): ?array
+    {
+        foreach ($this->candidateUrls($url) as $candidateUrl) {
+            try {
+                $response = Http::connectTimeout(5)
+                    ->timeout(20)
+                    ->retry(2, 250)
+                    ->withOptions(['verify' => false])
+                    ->withHeaders([
+                        'User-Agent' => 'Mozilla/5.0',
+                        'Accept' => 'image/*,*/*;q=0.8',
+                        'Referer' => $this->refererFromUrl($candidateUrl),
+                    ])
+                    ->get($candidateUrl);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if (! $response->successful()) {
+                continue;
+            }
+
+            $contentType = strtolower((string) $response->header('Content-Type', ''));
+            if (! str_starts_with($contentType, 'image/')) {
+                continue;
+            }
+
+            return [$response->body(), $contentType, $candidateUrl];
+        }
+
+        return null;
+    }
+
+    /** @return array<int, string> */
+    private function candidateUrls(string $url): array
+    {
+        $candidates = [$url];
+        $uploadsPath = $this->extractUploadsPath($url);
+
+        if ($uploadsPath === null) {
+            return $candidates;
+        }
+
+        $scheme = parse_url($url, PHP_URL_SCHEME) ?: 'https';
+
+        foreach ((array) config('legacy_import.image_candidate_origins', []) as $entry) {
+            if (! is_string($entry) || $entry === '') {
+                continue;
+            }
+
+            $colonPos = strpos($entry, ':');
+            $host = $colonPos === false ? $entry : substr($entry, 0, $colonPos);
+            $pathPrefix = $colonPos === false ? '' : rtrim(substr($entry, $colonPos + 1), '/');
+
+            if ($host === '') {
+                continue;
+            }
+
+            $candidate = $scheme . '://' . $host . $pathPrefix . '/wp-content/uploads/' . $uploadsPath;
+            if (! in_array($candidate, $candidates, true)) {
+                $candidates[] = $candidate;
+            }
+        }
+
+        return $candidates;
+    }
+
+    private function extractUploadsPath(string $url): ?string
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+        if (! is_string($path)) {
+            return null;
+        }
+
+        $marker = 'wp-content/uploads/';
+        $pos = strpos($path, $marker);
+
+        return $pos === false ? null : substr($path, $pos + strlen($marker));
     }
 
     private function refererFromUrl(string $url): string

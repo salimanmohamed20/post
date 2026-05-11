@@ -53,10 +53,10 @@ class LegacySourceReader
     private function sqlRows(string $contents, array $preferredTables = []): array
     {
         preg_match_all(
-            '/INSERT\s+INTO\s+[`"]?(?<table>[\w\.]+)[`"]?\s*\((?<columns>[^)]+)\)\s*VALUES\s*(?<values>.*?);/is',
+            '/INSERT\s+INTO\s+[`"]?(?<table>[\w\.]+)[`"]?\s*\((?<columns>[^)]+)\)\s*VALUES\s*/is',
             $contents,
             $matches,
-            PREG_SET_ORDER,
+            PREG_SET_ORDER | PREG_OFFSET_CAPTURE,
         );
 
         $rows = [];
@@ -66,7 +66,7 @@ class LegacySourceReader
         );
 
         foreach ($matches as $match) {
-            $table = Str::lower(trim((string) $match['table'], "`\" "));
+            $table = Str::lower(trim((string) $match['table'][0], "`\" "));
             $table = Str::afterLast($table, '.');
 
             if ($normalizedPreferredTables !== [] && ! in_array($table, $normalizedPreferredTables, true)) {
@@ -75,10 +75,14 @@ class LegacySourceReader
 
             $columns = array_map(
                 fn (string $column): string => trim($column, " \t\n\r\0\x0B`\""),
-                explode(',', (string) $match['columns']),
+                explode(',', (string) $match['columns'][0]),
             );
 
-            foreach ($this->parseSqlTuples((string) $match['values']) as $tuple) {
+            $valuesStart = $match[0][1] + strlen((string) $match[0][0]);
+            $valuesEnd = $this->findInsertStatementEnd($contents, $valuesStart);
+            $valuesChunk = substr($contents, $valuesStart, $valuesEnd - $valuesStart);
+
+            foreach ($this->parseSqlTuples($valuesChunk) as $tuple) {
                 $values = $this->splitSqlTupleValues($tuple);
 
                 if (count($columns) !== count($values)) {
@@ -93,6 +97,34 @@ class LegacySourceReader
         }
 
         return $rows;
+    }
+
+    private function findInsertStatementEnd(string $contents, int $start): int
+    {
+        $inString = false;
+        $length = strlen($contents);
+
+        for ($i = $start; $i < $length; $i++) {
+            $char = $contents[$i];
+            $previous = $i > 0 ? $contents[$i - 1] : null;
+            $next = $i + 1 < $length ? $contents[$i + 1] : null;
+
+            if ($char === "'" && $previous !== '\\') {
+                if ($inString && $next === "'") {
+                    $i++;
+                    continue;
+                }
+
+                $inString = ! $inString;
+                continue;
+            }
+
+            if ($char === ';' && ! $inString) {
+                return $i;
+            }
+        }
+
+        return $length;
     }
 
     /** @return array<int, string> */

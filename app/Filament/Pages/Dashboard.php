@@ -8,6 +8,7 @@ use Filament\Actions\Action;
 use Filament\Forms\Components\FileUpload;
 use Filament\Notifications\Notification;
 use Filament\Pages\Dashboard as BaseDashboard;
+use Illuminate\Support\Facades\Bus;
 
 class Dashboard extends BaseDashboard
 {
@@ -62,16 +63,22 @@ class Dashboard extends BaseDashboard
                     $sourcePath = $this->resolveUploadedFilePath($data, 'uploaded_file');
 
                     if (! $sourcePath) {
-                        Notification::make()->title('لم يتم رفع ملف صالح')->danger()->send();
+                        Notification::make()
+                            ->title('لم يتم رفع ملف صالح')
+                            ->danger()
+                            ->send();
 
                         return;
                     }
 
-                    app()->call([new ImportCategoriesJob($sourcePath), 'handle']);
-                    app()->call([new ImportArticlesJob($sourcePath), 'handle']);
+                    Bus::chain([
+                        new ImportCategoriesJob($sourcePath),
+                        new ImportArticlesJob($sourcePath),
+                    ])->dispatch();
 
                     Notification::make()
-                        ->title('تم اكتمال الاستيراد')
+                        ->title('بدأ الاستيراد')
+                        ->body('سيتم استيراد التصنيفات أولا ثم المقالات في الخلفية.')
                         ->success()
                         ->send();
                 }),

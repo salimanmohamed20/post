@@ -4,6 +4,7 @@ use App\Jobs\ImportArticlesJob;
 use App\Jobs\ImportCategoriesJob;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Bus;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -46,8 +47,10 @@ Artisan::command('import:all {categoriesPath? : Categories JSON path} {articlesP
         return;
     }
 
-    dispatch(new ImportCategoriesJob($categoriesPath));
-    dispatch(new ImportArticlesJob($articlesPath));
+    Bus::chain([
+        new ImportCategoriesJob($categoriesPath),
+        new ImportArticlesJob($articlesPath),
+    ])->dispatch();
 
     $this->info('Categories and articles import jobs dispatched to the database queue.');
 })->purpose('Import categories first, then articles');

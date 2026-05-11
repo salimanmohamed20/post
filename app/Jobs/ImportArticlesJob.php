@@ -10,8 +10,6 @@ use App\Services\CacheInvalidationService;
 use App\Services\ImageService;
 use App\Services\InlineArticleImageService;
 use App\Services\SlugService;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Carbon;
@@ -20,9 +18,6 @@ use Illuminate\Support\Str;
 class ImportArticlesJob implements ShouldQueue
 {
     use Queueable;
-
-    /** @var array<string, string> */
-    private array $localizedImageCache = [];
 
     public function __construct(
         private readonly ?string $sourcePath = null,
@@ -81,7 +76,7 @@ class ImportArticlesJob implements ShouldQueue
                     'slug' => $slug,
                     'title' => (string) ($row['title'] ?? $slug),
                     'legacy_source_id' => filled($legacyId) ? (string) $legacyId : null,
-                    'body' => $this->localizeBodyImages($this->normalizeBodyImages((string) ($row['body'] ?? ''))),
+                    'body' => $this->normalizeBodyImages((string) ($row['body'] ?? '')),
                     'excerpt' => $row['excerpt'] ?? null,
                     'category_id' => $category->id,
                     'published_at' => isset($row['published_at']) ? Carbon::parse($row['published_at']) : null,
@@ -244,6 +239,14 @@ class ImportArticlesJob implements ShouldQueue
             return [];
         }
 
+        $postsById = [];
+        foreach ($posts as $post) {
+            $id = $post['ID'] ?? $post['id'] ?? null;
+            if ($id !== null) {
+                $postsById[(string) $id] = $post;
+            }
+        }
+
         $categoryTaxonomyByObject = [];
         $categoryTermByTaxonomyId = [];
         foreach ($termTaxonomy as $taxonomyRow) {
@@ -301,7 +304,7 @@ class ImportArticlesJob implements ShouldQueue
             }
 
             $postId = (string) $id;
-            $images = $this->extractWordPressImages($metaByPost[$postId] ?? [], $metaByPost);
+            $images = $this->extractWordPressImages($metaByPost[$postId] ?? [], $metaByPost, $postsById);
             $normalized[] = [
                 'legacy_id' => $id,
                 'slug' => (string) ($post['post_name'] ?? Str::slug((string) ($post['post_title'] ?? $postId))),
@@ -338,9 +341,10 @@ class ImportArticlesJob implements ShouldQueue
     /**
      * @param  array<string, array<int, string>>  $meta
      * @param  array<string, array<string, array<int, string>>>  $allMetaByPost
+     * @param  array<string, array<string, mixed>>  $postsById
      * @return array<int, string>
      */
-    private function extractWordPressImages(array $meta, array $allMetaByPost): array
+    private function extractWordPressImages(array $meta, array $allMetaByPost, array $postsById): array
     {
         $images = [];
 
@@ -358,6 +362,12 @@ class ImportArticlesJob implements ShouldQueue
                 if (filled($attachedFile)) {
                     $images[] = $this->resolveWordPressImagePath($attachedFile);
                 }
+            }
+
+            $attachment = $postsById[(string) $thumbnailId] ?? null;
+            $guid = is_array($attachment) ? ($attachment['guid'] ?? null) : null;
+            if (filled($guid)) {
+                $images[] = $this->resolveWordPressImagePath((string) $guid);
             }
         }
 
@@ -389,108 +399,6 @@ class ImportArticlesJob implements ShouldQueue
             },
             $html,
         );
-    }
-
-    private function localizeBodyImages(string $html): string
-    {
-        if (blank($html)) {
-            return $html;
-        }
-
-        return (string) preg_replace_callback(
-            '/(<img\b[^>]*\bsrc=["\'])([^"\']+)(["\'][^>]*>)/i',
-            function (array $matches): string {
-                $prefix = $matches[1] ?? '';
-                $src = trim((string) ($matches[2] ?? ''));
-                $suffix = $matches[3] ?? '';
-
-                if ($src === '' || ! filter_var($src, FILTER_VALIDATE_URL)) {
-                    return $prefix . $src . $suffix;
-                }
-
-                $resolved = $this->resolveWordPressImagePath($src);
-                $localized = $this->downloadInlineImage($resolved);
-                $finalSrc = $localized ?? $this->proxyImageUrl($resolved);
-
-                return $prefix . $finalSrc . $suffix;
-            },
-            $html,
-        );
-    }
-
-    private function downloadInlineImage(string $url): ?string
-    {
-        if (isset($this->localizedImageCache[$url])) {
-            return $this->localizedImageCache[$url];
-        }
-
-        if (! filter_var($url, FILTER_VALIDATE_URL)) {
-            return null;
-        }
-
-        try {
-            $response = Http::connectTimeout(5)
-                ->timeout(20)
-                ->retry(2, 250)
-                ->withOptions(['verify' => false])
-                ->withHeaders([
-                    'User-Agent' => 'Mozilla/5.0',
-                    'Accept' => 'image/*,*/*;q=0.8',
-                    'Referer' => $this->refererFromUrl($url),
-                ])
-                ->get($url);
-        } catch (\Throwable) {
-            $this->localizedImageCache[$url] = '';
-            return null;
-        }
-
-        if (! $response->successful()) {
-            $this->localizedImageCache[$url] = '';
-            return null;
-        }
-
-        $contentType = (string) $response->header('Content-Type', '');
-        if (! str_starts_with(strtolower($contentType), 'image/')) {
-            $this->localizedImageCache[$url] = '';
-            return null;
-        }
-
-        $extension = $this->extensionFromResponse($url, $contentType);
-        $relativePath = 'imports/inline-images/' . date('Y/m') . '/' . sha1($url) . '.' . $extension;
-
-        Storage::disk('public')->put($relativePath, $response->body());
-
-        $localUrl = '/storage/' . $relativePath;
-        $this->localizedImageCache[$url] = $localUrl;
-
-        return $localUrl;
-    }
-
-    private function refererFromUrl(string $url): string
-    {
-        $parts = parse_url($url);
-        $scheme = $parts['scheme'] ?? 'https';
-        $host = $parts['host'] ?? '';
-
-        return $host === '' ? '' : $scheme . '://' . $host . '/';
-    }
-
-    private function extensionFromResponse(string $url, string $contentType): string
-    {
-        $path = parse_url($url, PHP_URL_PATH);
-        $ext = is_string($path) ? strtolower(pathinfo($path, PATHINFO_EXTENSION)) : '';
-        if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'], true)) {
-            return $ext;
-        }
-
-        return match (strtolower(trim(explode(';', $contentType)[0]))) {
-            'image/jpeg' => 'jpg',
-            'image/png' => 'png',
-            'image/gif' => 'gif',
-            'image/webp' => 'webp',
-            'image/svg+xml' => 'svg',
-            default => 'jpg',
-        };
     }
 
     private function resolveWordPressImagePath(string $pathOrUrl): string
@@ -590,15 +498,6 @@ class ImportArticlesJob implements ShouldQueue
         }
 
         return $url;
-    }
-
-    private function proxyImageUrl(string $url): string
-    {
-        if (! filter_var($url, FILTER_VALIDATE_URL)) {
-            return $url;
-        }
-
-        return route('legacy-image-proxy', ['url' => $url]);
     }
 
     private function nullableString(mixed $value): ?string
